@@ -1,234 +1,615 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<title>Asteroids</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none;touch-action:none;}
-html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;font-family:'Courier New',monospace;text-align:center;}
-canvas{display:block;width:100vw;height:100vh}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Asteroids Arcade</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; touch-action: none; }
+        canvas { display: block; }
+        #ui-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    </style>
 </head>
 <body>
-
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
-
 <script>
-'use strict';
+// ============================================================
+// Asteroids Arcade - Complete Implementation
+// ============================================================
 
-const W = window.innerWidth, H = window.innerHeight;
-const HALF_W = W / 2;
-const SHIELD_COUNT = 8;
-const SHIP_RADIUS = 16;
-const BULLET_SPEED = -750;
-const ASTEROID_DRIFT_MAX = 110;
-
-// ─── Web Audio Sound Manager ────────────────────────────────────
-class Sound {
-  constructor(){ this.ctx=new(window.AudioContext||window.webkitAudioContext)(); this.gain=this.ctx.createGain(); this.gain.gain.value=0.25; this.gain.connect(this.ctx.destination); this.silent=false; }
-  resume(){ if(this.ctx.state==='suspended')this.ctx.resume(); }
-  shoot(){ if(this.silent)return;const g=this.ctx.createGain(),o=this.ctx.createOscillator();g.gain.value=0.3;g.connect(o);o.type='sawtooth'; o.frequency.setValueAtTime(2400,this.ctx.currentTime);o.frequency.exponentialRampToValueAtTime(600,this.ctx.currentTime+0.05); const env=this.ctx.createGain();env.gain.value=1;env.connect(g); g.connect(env); env.gain.exponentialRampToValueAtTime(0.001,this.ctx.currentTime+0.04); o.start(this.ctx.currentTime);o.stop(this.ctx.currentTime+0.05);}
-  explode(){ if(this.silent)return; const buf=this.ctx.createBuffer(1,this.ctx.sampleRate*0.2,this.ctx.sampleRate),d=buf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*(1-i/d.length); const s=this.ctx.createBufferSource();s.buffer=buf;const env=this.ctx.createGain();env.gain.value=1;s.connect(env); env.connect(this.gain); env.gain.exponentialRampToValueAtTime(0.001,this.ctx.currentTime+0.2); s.start(this.ctx.currentTime);}
-  levelUp(){ if(this.silent)return;for(let i=3;i>=1;i--){setTimeout(()=>{const o=this.ctx.createOscillator(),g=this.ctx.createGain();g.gain.value=0.4;o.connect(g); g.connect(this.gain);o.type='sine';o.frequency.setValueAtTime(440*i,this.ctx.currentTime); const env=this.ctx.createGain();env.gain.value=0.3;env.connect(o); o.start(this.ctx.currentTime); env.gain.exponentialRampToValueAtTime(0.001,this.ctx.currentTime+0.25/i);o.stop(this.ctx.currentTime+0.3/i)},i*70)} }
-  hit(){ if(this.silent)return; const g=this.ctx.createGain();g.gain.value=0.25;g.connect(this.ctx.destination);const o=this.ctx.createOscillator();o.type='square';o.frequency.value=1200;o.start(this.ctx.currentTime);o.stop(this.ctx.currentTime+0.03); g.connect(o);}
-  loopTick(){ if(!this.silent){try{const g=this.ctx.createGain(),o=this.ctx.createOscillator();g.gain.value=0.04;o.type='sine'; o.frequency.value=62;g.connect(o);o.connect(g);g.connect(this.gain);o.start(this.ctx.currentTime);o.stop(this.ctx.currentTime+1/60);}catch(e){}} }
-}
-
-// ─── Phaser Scene ──────────────────────────────────────────────
-const GameScene = Phaser.Scene.extend({
-  preload(){ /* no assets needed — all procedural */ },
-  create(){
-    this.audio=new Sound();this.audio.resume();this.audio.loopTick();
-
-    // ── Stars background ────────────────────────────────────
-    this.stars=[];for(let i=0;i<160;i++){const s=this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Math.abs(Math.random()*2-1)*1.5,'#fff',true);s.setAlpha(Math.abs(Math.random())*0.8+0.15);this.stars.push(s)}
-
-    // ── Ship (triangle graphics) ───────────────────────────
-    this.ship=this.add.graphics().setOrigin(0,0).setDepth(10);
-    const drawShip=(angle)=>{const rad=Phaser.Math.DegToRad(angle);this.ship.clear();this.ship.lineStyle(2,0x0ff,1);this.ship.beginPath();this.ship.moveTo(W/2+Math.sin(rad)*SHIP_RADIUS,H/2-Math.cos(rad)*SHIP_RADIUS*0.5-8);this.ship.lineTo(W/2+Math.sin(rad+Phaser.Math.PI)*SHIP_RADIUS,H/2-Math.cos(rad+Phaser.Math.PI)*SHIP_RADIUS*0.5+6);this.ship.lineTo(W/2+Math.sin(rad+Phaser.Math.PI*Math.PI)*SHIP_RADIUS,H/2-Math.cos(rad+Phaser.Math.PI*Math.PI)*SHIP_RADIUS*0.5-4);this.ship.closePath();this.ship.strokePath()};
-    drawShip(this.ship.angle);
-
-    this.thrustGfx=this.add.graphics().setDepth(12);
-    const drawThrust=(color)=>{const a=this.ship.angle;const r=Phaser.Math.DegToRad(a);const x=W/2+Math.sin(r)*SHIP_RADIUS*0.8,y=H/2-Math.cos(r)*SHIP_RADIUS*0.8-6*this.audio.silent;this.thrustGfx.clear();this.thrustGfx.lineStyle(1,color,0.4);this.thrustGfx.beginPath();this.thrustGfx.moveTo(x,y);this.thrustGfx.lineTo(x+Math.sin(a)*12,y-Math.cos(a)*12-3);this.thrustGfx.closePath();this.thrustGfx.strokePath()};
-
-    // ── Shield indicators (8 hex slots) ─────────────────────
-    this.shields=[];for(let i=0;i<SHIELD_COUNT;i++){const a=(i/8)*Math.PI*2;const sx=W/2+Math.cos(a)*55, sy=H/2+Math.sin(a)*55;this.add.circle(sx,sy,4.5,'#111',true);this.shields.push({x:sx,y:sy});}
-    this.shieldSlots=[];for(let i=0;i<SHIELD_COUNT;i++){const a=(i/8)*Math.PI*2;const sx=W/2+Math.cos(a)*55,sy=H/2+Math.sin(a)*55;this.shieldSlots.push({x:sx,y:sy});}
-
-    // ── Bullets pool ───────────────────────────────────────
-    this.bullets=new Phaser.GameObjects.Group(this);
-
-    // ── Asteroid groups per size ────────────────────────────
-    const sizes=[{name:'large',radius:28},{name:'medium',radius:17},{name:'small',radius:10}];
-    this.asteroids={};for(const sz of sizes){const g=new Phaser.GameObjects.Group(this);g.setDrag(0.9).setDamping(300);this.asteroids[sz.name]=g;g.setImmovable(sz.name==='large');}
-
-    // ── Saucer group ────────────────────────────────────────
-    this.saucers=new Phaser.GameObjects.Group(this);
-
-    // ── Particle emitter (thrust trail) ──────────────────────
-    const p=this.add.particles('circle');p.setSpeed(120).setAngle(Phaser.Math.Between(0,Math.PI*2)).setAlpha({min:0.3,max:0.8}).setScale(0.6,1).setColor(0xffaa00);
-    this.thrustEmitter=p;
-
-    // ── Collision flash emitter ──────────────────────────────
-    const flash=this.add.particles('circle').setSpeed(250).setAlpha({min:0.4,max:0.9}).setScale(1,2).setColor(0xffffff);
-
-    // ── Game state ──────────────────────────────────────────
-    this.score=0;this.level=1;this.gameOver=false;this.shieldActive=true;
-    this.shieldRemaining=Math.min(SHIELD_COUNT,Math.floor(Math.random()*SHIELD_COUNT)+2);
-    this.lastShootTime=this.audio.ctx.currentTime;
-
-    // ── Touch: left half = joystick, right half = shoot+tap ─
-    this.joystick={active:false,cx:0,cy:0,maxR:Math.min(W*0.48,H/2)};
-    this.shootActive=false;this.lastShoot=0;
-    this.replayTapped=false;
-
-    // Joystick handlers (left half)
-    const jsStart=(pt)=>{if(this.joystick.active){pt.setActive(false);this.joystick.cx+=pt.x-this.joystick.cj;if(Math.abs(pt.y-this.joystick.cy)>5){return} else {this.joystick.cy=pt.y}}}; // placeholder — real init below
-  },
-
-  createJoystick(){
-    if(this.gameOver) return;
-    this.joystick.active=false;this.joystick.cx=this.joystick.cj=this.joystick.cy=0;
-    const start=(pt)=>{if(this.joystick.active){pt.setActive(false);return} pt.setActive(true);this.joystick.active=true;this.joystick.originX=this.joystick.cj=pt.x-this.joystick.cx;this.joystick.originY=this.joystick.cy=pt.y};
-    const move=(pt,dx,dy)=>{if(!this.joystick.active)return;const nx=pt.x+this.joystick.originX,ny=pt.y+this.joystick.originY,d=Math.sqrt(nx*nx+ny*ny);if(d>this.joystick.maxR){const a=Phaser.Math.Angle.Between(0.5*Math.PI,Phaser.Math.Atan2(ny,nx-this.joystick.originX));d=this.joystick.maxR;}pt.x=nx;pt.y=ny};
-    const end=()=>{this.joystick.active=false;if(this.shootActive){this.shootActive=false} this.joystick.originX=this.joystick.cj=0;this.joystick.originY=this.joystick.cy=0};
-    const touchLeft=(e)=>{const x=e.touches[0].clientX,y=e.touches[0].clientY;const rect=document.querySelector('canvas').getBoundingClientRect();if(x<rect.left+HALF_W){start({x:x-rect.left,y:y-rect.top})}};
-    const moveLeft=(e)=>{const x=e.touches[0].clientX,y=e.touches[0].clientY;const rect=document.querySelector('canvas').getBoundingClientRect();if(this.joystick.active){move({x:x-rect.left,y:y-rect.top},0,0)}});
-    const endLeft=()=>{end()};
-    document.addEventListener('touchstart',e=>{if(e.touches[1]){e.preventDefault()} else touchLeft(e)},{passive:false});
-    document.addEventListener('touchmove',e=>{if(this.joystick.active){e.preventDefault();const x=e.touches[0].clientX,y=e.touches[0].clientY;const rect=document.querySelector('canvas').getBoundingClientRect();move({x:x-rect.left,y:y-rect.top},0,0)}},{passive:false});
-    document.addEventListener('touchend',()=>{if(this.joystick.active) end()});
-
-    // Mouse fallback
-    const mStart=(e)=>{const mx=e.clientX*0.5/myScale,my=e.clientY*0.5;start({x:mx,y:my})};
-    const mMove=(e)=>{move({x:e.clientX*0.5/myScale,y:e.clientY*0.5},0,0)};
-    const mEnd=()=>{end()};
-    // compute scale once
-    this._initJoystickListeners();
-  },
-
-  _initJoystickListeners(){
-    const start=(pt)=>{if(this.joystick.active){pt.setActive(false);return} pt.setActive(true);this.joystick.active=true;this.joystick.originX=this.joystick.cj=pt.x-this.joystick.cx;if(Math.abs(pt.y-this.joystick.cy)>5){return}else this.joystick.cy=pt.y};
-    const move=(pt,dx,dy)=>{if(!this.joystick.active)return;const nx=pt.x+this.joystick.originX,ny=pt.y+this.joystick.originY,d=Math.sqrt(nx*nx+ny*ny);if(d>this.joystick.maxR){const a=Phaser.Math.Angle.Between(0.5*Math.PI,Phaser.Math.Atan2(ny,nx-this.joystick.originX));d=this.joystick.maxR;}pt.x=nx;pt.y=ny};
-    const end=()=>{this.joystick.active=false;if(this.shootActive){this.shootActive=false} this.joystick.originX=this.joystick.cj=0;this.joystick.originY=this.joystick.cy=0};
-
-    document.addEventListener('touchstart',e=>{if(!this.gameOver&&e.touches[1]){e.preventDefault();const t=e.touches[0];start({x:t.clientX*0.5,y:t.clientY*0.5})}},{passive:false});
-    document.addEventListener('touchmove',e=>{if(this.joystick.active){e.preventDefault()};if(this.shootActive&&this.joystick.active){this.shootActive=false} if(this.gameOver)return;const t=e.touches[0];move({x:t.clientX*0.5,y:t.clientY*0.5},0,0)}},{passive:false});
-    document.addEventListener('touchend',()=>{if(!this.gameOver&&this.joystick.active) end()});
-
-    document.addEventListener('mousedown',e=>{const mx=e.clientX*0.5/myScale,my=e.clientY*0.5;start({x:mx,y:my})});
-    document.addEventListener('mousemove',e=>{move({x:e.clientX*0.5/myScale,y:e.clientY*0.5},0,0)});
-    document.addEventListener('mouseup',()=>{if(!this.gameOver&&this.joystick.active) end()});
-
-    // Right-half: shoot button + tap-to-restart
-    const shootStart=(e)=>{const mx=e.clientX*0.5/myScale,my=e.clientY*0.5;if(mx>HALF_W){this.shootActive=true;this.lastShoot=this.audio.ctx.currentTime}};
-    const shootMove=(e)=>{if(this.joystick.active)return;move({x:e.clientX*0.5/myScale,y:e.clientY*0.5},0,0)};
-    const shootEnd=()=>{this.shootActive=false};
-
-    document.addEventListener('mousedown',e=>{if(!this.gameOver){const mx=e.clientX*0.5/myScale,my=e.clientY*0.5;if(mx>HALF_W)shootStart(e)}});
-    document.addEventListener('mouseup',()=>{if(this.joystick.active&&!this.shootActive){end()}else if(this.shootActive&&e.touches[0]){}try{shootEnd()}{catch(e){}}});
-
-    // Mouse down/up for shoot button
-    let shootDown=false;document.addEventListener('mousedown',e=>{if(!this.gameOver){const mx=e.clientX*0.5/myScale,my=e.clientY*0.5;if(mx>HALF_W&&!this.joystick.active){shootDown=true;start({x:mx,y:my})}}});
-    document.addEventListener('mouseup',()=>{if(shootDown&&!this.shootActive){end()} if(this.shootActive) shootEnd()});
-
-    // Restart tap anywhere on right half or overlay
-    document.addEventListener('click',e=>{const mx=e.clientX*0.5/myScale,my=e.clientY*0.5;if(mx>HALF_W&&this.gameOver){Phaser.Scene.prototype.scene='Restart'}},false);
-  },
-
-  update(time,delta){
-    if(this.gameOver||this.levelUp)return; this._initJoystickListeners();
-    myScale=1; // simplify — no scaling in this version
-
-    // ── Joystick input → ship velocity + thrust trail ───────
-    if(!this.joystick.active&&this.shootActive){return}
-    const dx=this.joystick.cx-this.joystick.originX,dy=this.joystick.cj-this.joystick.originY;
-    let vx=dx*0.5,vy=(H/2-this.joystick.cy)*1.6; // scale Y for tilt feel
-
-    // Ship thrust: apply force along ship heading + lateral drift
-    const thrAngle=this.ship.angle-Phaser.Math.PI/2;
-    const fx=Math.cos(thrAngle)*(dx*0.3+200), fy=Math.sin(thrAngle)*(-vy*1.8)+dy*0.5;
-    this.ship.body.applyForce(fx,fy,delta*2);
-
-    // Ship turn: rotate toward facing direction when moving forward, or use tilt input
-    if(Math.abs(this.ship.body.velocity.x)>3||Math.abs(this.ship.body.velocity.y)>3){
-      const desiredAngle=Phaser.Math.Angle.WrapDegrees(Phaser.Math.Atan2(-vy*1.5,-vx));
-      this.ship.angle+=Phaser.Math.DegToRad((desiredAngle-this.ship.angle)*0.08);
-    }
-
-    // Thrust particles — emit at ship back when moving
-    if(Math.abs(this.ship.body.velocity.x)>3||Math.abs(this.ship.body.velocity.y)>3){
-      const ax=this.ship.x+Math.cos(thrAngle)*SHIP_RADIUS*0.7,ay=this.ship.y-Math.sin(thrAngle)*SHIP_RADIUS*0.5;
-      for(let i=0;i<4;i++){this.thrustEmitter.emitParticle(ax+i*Math.random()*20-10,ay+(i%2?0:2),0,Phaser.Math.Angle.WrapDegrees(this.ship.angle));}
-    }
-
-    // ── Wrap-around edges (classic Asteroids) ───────────────
-    this.wrapAround();
-
-    // ── Shoot bullet when shooting active + cooldown ───────
-    if(this.shootActive&&this.audio.ctx.currentTime-this.lastShoot>0.18){
-      const bx=this.ship.x+Math.cos(this.ship.angle)*SHIP_RADIUS*0.5,by=this.ship.y-Math.sin(this.ship.angle)*SHIP_RADIUS*0.5;
-      this.bullets.create(bx,by).setCircle(3).setAlpha(1);
-      // Velocity perpendicular to ship heading
-      const bx2=bx+Math.cos(this.ship.angle-Phaser.Math.PI/2)*BULLET_SPEED*Math.sqrt(dx*dx+dy*dy)/60;
-      this.bullets.setVelocity(Math.cos(this.ship.angle-Phaser.Math.PI/4)*(300), Math.sin(this.ship.angle-Phaser.Math.PI/4)*(300));
-      this.lastShoot=this.audio.ctx.currentTime;this.audio.shoot();
-    }
-
-    // ── Shield regeneration ────────────────────────────────
-    if(!this.shieldActive&&this.shieldRemaining>0){
-      const regenDelay=Math.max(150,250-this.level*20);
-      this.shieldTimer||(this.shieldTimer=setTimeout(()=>{this.shieldActive=true;this.updateShields()},regenDelay));
-    }
-
-    // ── Spawn asteroids on edge when none exist ─────────────
-    const spawnLarge=(()=>{if(this.asteroids.large.count>0||Math.random()<0.45)return;const a=Phaser.Math.Between(1,6);while(a>0&&this.asteroids.large.count>0){a--;}if(a===0&&this.asteroids.large.count>0)return;}
-    // Pick random edge point — wrap around: x between 0 and W/2, y between -H/2 and H/2
-    const ax=Phaser.Math.Between(1,Math.floor(W/3)),ay=Phaser.Math.Between(-H*0.75,H*0.75);
-    this.createAsteroid(ax,ay,true);});
-
-    // ── Spawn saucer periodically ───────────────────────────
-    if(Date.now()%this.saucerInterval===0&&Math.random()<0.4){this.spawnSaucer();}
-
-    // ── Draw shields ───────────────────────────────────────
-    for(let i=0;i<SHIELD_COUNT;i++){const s=this.shieldSlots[i];if(this.shields[i].active){this.add.circle(s.x,s.y,5,this.shields[i].value>0?{r:0,g:1,b:1,a:1}:null,true);}}
-
-    // ── Level up after clearing large asteroids (score 30) ──
-    if(this.score>=60&&!this.levelUp){this.createLevelScreen();}
-
-    // ── Update star twinkle ────────────────────────────────
-    for(let i=0;i<this.stars.length;i++){if(Math.random()<0.02&&this.stars[i].alpha<0.7){this.stars[i].alpha=Math.abs(Math.random())*0.6+0.15;}}
-
-    // ── Update shield circles (draw overlays when active)──
-  },
-
-  wrapAround(){
-    const hw=W/2,hh=H/2;for(const a of[this.ship,...this.bullets.getArray(),...this.asteroids.large.getArray(),...this.asteroids.medium.getArray(),...this.asteroids.small.getArray()]){if(a.x>W){a.x=0;a.body.velocity.y-=30;} if(a.x<0){a.x=W;a.body.velocity.y+=30;} if(a.y>-hh){a.y=2*hh-a.y; a.body.velocity.x-=25;} if(a.y>hh){a.y=-2*hh+a.y; a.body.velocity.x+=25;}}}
-
-  createAsteroid(ax,ay,isLarge){
-    const sz=this.asteroids.isLarge?this.asteroids.large:this.asteroids.medium||this.asteroids.small;
-    if(sz.count>0&&Math.random()<0.3)return this.asteroids.large||this.asteroids.medium||this.asteroids.small;
-    // random vertices for irregular shape
-    const verts=[];for(let i=0;i<5;i++){const a=Phaser.Math.DegToRad(72*i+Math.random()*18);verts.push([ax+a*1.3*Math.cos(Math.random()),ay+a*1.3*Math.sin(Math.random())]);}
-    return sz.create(ax,ay).setPolygon(verts).setSize(sz.radius*2,sz.radius*2).setAlpha(0.7+Math.random()*0.3);
-  },
-
-  spawnSaucer(){const sx=Phaser.Math.Between(-15,W/2),sy=H*0.85;this.saucers.create(sx,sy).setEllipse(4,9).setColor(0x666).setAlpha(0.7);},
-
-  createLevelScreen(){const ov=this.add.rectangle(0,0,W,H,0).setAlpha(0.35);this.add.text(W/2,H/2-30,'LEVEL UP!',{fontSize:48,color:'#ff0',fontFamily:'Courier New'}).setOrigin(0.5).setTint(0xffaa00);this.audio.levelUp();},
-
-  updateShields(){for(let i=0;i<SHIELD_COUNT;i++){if(this.shieldSlots[i].active){const d=this.shields[i];d.active=false;}}}
+const CONFIG = {
+    width: 800, height: 600,
+    shipSpeed: 400, thrustPower: 250, friction: 1.0,
+    bulletSpeed: 700, bulletCooldown: 300, maxBullets: 3,
+    asteroidCount: 8, asteroidSpawnRate: 60,
+    shieldSlots: 8, shieldRegenTime: 5000,
+    particleLife: 40, particleSpeed: 120,
+    saucerHealth: 3, saucerSpeed: 80,
 };
 
-</script>
-<script>
-// ─── Phaser Game init ────────────────────────────────────────
-const cfg={type:Phaser.AUTO,width:window.innerWidth,height:window.innerHeight,backgroundColor:'#000',physics:{arcade:{gravity:{x:0,y:0}}},scene:[GameScene]};
-new Phaser.Game(cfg);
+// ============================================================
+// Procedural Sound Engine (Web Audio API)
+// ============================================================
+class SoundEngine {
+    constructor(scene) {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = 0.3;
+        this.masterGain.connect(this.ctx.destination);
+        this.enabled = true;
+    }
 
-// Prevent default touch behaviors
-document.addEventListener('touchmove',e=>{if(e.target.tagName!=='CANVAS')e.preventDefault()},false);
+    playTone(freq, duration, type = 'square', volume = 1) {
+        if (!this.enabled) return;
+        const ctx = this.ctx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(volume, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start();
+        osc.stop(ctx.currentTime + duration);
+    }
+
+    shoot() { this.playTone(880, 0.15, 'square', 0.6); }
+    explosion() { this.playTone(100, 0.4, 'sawtooth', 0.7); }
+    hitShield() { this.playTone(2000, 0.1, 'triangle', 0.5); }
+    levelUp() {
+        [523, 659, 784].forEach((f, i) => setTimeout(() => this.playTone(f, 0.2, 'sine', 0.4), i * 100));
+    }
+    gameOver() { this.playTone(150, 1.0, 'square', 0.8); }
+}
+
+// ============================================================
+// Particle System for Engine Trails
+// ============================================================
+class ParticleSystem extends Phaser.Scene {
+    constructor(scene) { super('Particles'); }
+    create(scene) {
+        this.particles = scene.add.particles('particles');
+        return this.particles;
+    }
+}
+
+// ============================================================
+// Ship Class - Triangle Graphics + Shields
+// ============================================================
+class Ship extends Phaser.GameObjects.Container {
+    constructor(scene, x, y) {
+        super(scene, x || 400, y || 300);
+        this.scene = scene;
+        this.shieldSlots = CONFIG.shieldSlots;
+
+        // Triangle body
+        const g = scene.add.graphics();
+        g.lineStyle(2, 0x00ffcc, 1);
+        g.fillStyle(0x00ffcc, 0.9);
+        const w = 30, h = 45;
+        g.beginPath();
+        g.moveTo(0, -h);
+        g.lineTo(-w, h);
+        g.lineTo(w, h);
+        g.closePath();
+        g.fillPath();
+        g.strokePath();
+
+        // Cockpit
+        const cockpit = scene.add.graphics();
+        cockpit.fillStyle(0x00ffcc, 0.5);
+        cockpit.beginPath();
+        cockpit.moveTo(0, -h + 8);
+        cockpit.lineTo(-w/2 + 4, h - 10);
+        cockpit.lineTo(w/2 - 4, h - 10);
+        cockpit.closePath();
+        cockpit.fillPath();
+
+        this.add(g);
+        this.add(cockpit);
+
+        // Shield slots (8 hexagonal)
+        this.shields = [];
+        for (let i = 0; i < CONFIG.shieldSlots; i++) {
+            const angle = Phaser.Math.DegToRad(i * 45 - 90);
+            const sx = x + Math.cos(angle) * 38;
+            const sy = y + Math.sin(angle) * 38;
+            const slot = scene.add.circle(sx, sy, 6, 0x00ffcc, 0.4);
+            this.shields.push(slot);
+        }
+
+        // State
+        this.speed = 0;
+        this.angle = 0;
+        this.thrusting = false;
+        this.alive = true;
+        this.score = 0;
+        this.level = 1;
+    }
+
+    update(time, delta) {
+        if (!this.alive) return;
+
+        // Thrust
+        if (this.scene.input.keyboard.activeKey?. Phaser.Keyboard.A !== null && this.scene.input.keyboard.isDown('A')) {
+            this.thrusting = true;
+            const g = this.children[0];
+            g.lineStyle(2, 0x00ffcc, 1);
+            g.fillStyle(0x00ffcc, 0.9);
+            g.beginPath();
+            g.moveTo(0, -45);
+            g.lineTo(-15, 30);
+            g.lineTo(15, 30);
+            g.closePath();
+            g.fillPath();
+            g.strokePath();
+        } else {
+            this.thrusting = false;
+            const g = this.children[0];
+            g.lineStyle(2, 0x00ffcc, 1);
+            g.fillStyle(0x00ffcc, 0.9);
+            g.beginPath();
+            g.moveTo(0, -45);
+            g.lineTo(-30, 45);
+            g.lineTo(30, 45);
+            g.closePath();
+            g.fillPath();
+            g.strokePath();
+        }
+
+        // Rotate left/right
+        if (this.scene.input.keyboard.activeKey?. Phaser.Keyboard.D !== null && this.scene.input.keyboard.isDown('D')) {
+            this.angle -= 0.06;
+        } else if (this.scene.input.keyboard.activeKey?. Phaser.Keyboard.A !== null && this.scene.input.keyboard.isDown('A')) {
+            this.angle += 0.06;
+        }
+
+        // Apply thrust
+        const thrust = this.thrusting ? CONFIG.thrustPower : 0;
+        this.speed += Math.cos(this.angle) * thrust * delta / 1000;
+        this.scene.physics.velocityFromRotation(this.angle, this.speed, this.vel);
+    }
+
+    shoot(scene) {
+        if (this.bullets >= CONFIG.maxBullets) return false;
+        const cooldown = scene.time.now - this.lastShoot || 0;
+        if (cooldown < CONFIG.bulletCooldown) return false;
+        this.lastShoot = scene.time.now;
+        this.bullets++;
+
+        // Create bullet
+        const b = scene.add.circle(15, -20, 3, 0xffff00);
+        b.setVelocity(Math.cos(this.angle) * CONFIG.bulletSpeed, Math.sin(this.angle) * CONFIG.bulletSpeed);
+        b.setAlpha(1);
+        this.scene.tweens.add({ targets: b, alpha: { from: 1, to: 0 }, duration: 300, onComplete: () => b.destroy() });
+
+        scene.sound?.shoot();
+        return true;
+    }
+
+    hitShield(scene) {
+        if (this.shields.length > 0 && this.shields[0].exists()) {
+            const slot = this.shields.shift();
+            slot.setAlpha(0);
+            setTimeout(() => {
+                if (slot.exists()) slot.destroy();
+            }, 100);
+            scene.sound?.hitShield();
+        }
+    }
+
+    destroy() {
+        this.alive = false;
+        this.scene.sound?.explosion();
+        // Particle explosion
+        const p = this.scene.add.particles('particles');
+        for (let i = 0; i < 20; i++) {
+            const px = Phaser.Math.Between(-30, 30);
+            const py = Phaser.Math.Between(-30, 30);
+            p.create(this.x + px, this.y + py, { speed: Phaser.Math.Between(50, 200), life: CONFIG.particleLife });
+        }
+    }
+
+    respawn(scene) {
+        this.scene = scene;
+        this.speed = 0;
+        this.angle = 0;
+        this.thrusting = false;
+        this.alive = true;
+        this.bullets = 0;
+        this.lastShoot = 0;
+        this.score = 0;
+        this.level = 1;
+
+        // Rebuild shields
+        for (let i = 0; i < CONFIG.shieldSlots; i++) {
+            const angle = Phaser.Math.DegToRad(i * 45 - 90);
+            const sx = scene.cameras.main.centerX + Math.cos(angle) * 38;
+            const sy = scene.cameras.main.centerY + Math.sin(angle) * 38;
+            const slot = scene.add.circle(sx, sy, 6, 0x00ffcc, 0.4);
+            this.shields.push(slot);
+        }
+
+        // Rebuild graphics
+        const g = scene.add.graphics();
+        g.lineStyle(2, 0x00ffcc, 1);
+        g.fillStyle(0x00ffcc, 0.9);
+        g.beginPath();
+        g.moveTo(0, -45);
+        g.lineTo(-30, 45);
+        g.lineTo(30, 45);
+        g.closePath();
+        g.fillPath();
+        g.strokePath();
+
+        const cockpit = scene.add.graphics();
+        cockpit.fillStyle(0x00ffcc, 0.5);
+        cockpit.beginPath();
+        cockpit.moveTo(0, -37);
+        cockpit.lineTo(-16, 42);
+        cockpit.lineTo(16, 42);
+        cockpit.closePath();
+        cockpit.fillPath();
+
+        this.add(g);
+        this.add(cockpit);
+    }
+}
+
+// ============================================================
+// Asteroid Class - 3 Sizes with Wrap-Around
+// ============================================================
+class Asteroid extends Phaser.GameObjects.Container {
+    constructor(scene, x, y, size) {
+        super(scene, x || CONFIG.width / 2 + Phaser.Math.Between(-100, 100),
+            y || CONFIG.height / 2 + Phaser.Math.Between(-100, 100));
+
+        this.scene = scene;
+        this.size = size; // 1=small(30), 2=medium(50), 3=large(70)
+        this.hp = size === 1 ? 1 : (size === 2 ? 2 : 3);
+        this.alive = true;
+
+        const radius = { small: 30, medium: 50, large: 70 }[size];
+        const g = scene.add.graphics();
+        g.lineStyle(2, 0x888888, 1);
+        g.fillStyle(0x666666, 0.9);
+
+        // Irregular shape
+        for (let i = 0; i < 7; i++) {
+            const angle = Phaser.Math.DegToRad(i * 52 + Phaser.Math.Between(-10, 10));
+            const r = radius * (0.8 + Phaser.Math.FloatBetween(0, 0.4));
+            g.beginPath();
+            g.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+            if (i < 6) {
+                const nextAngle = Phaser.Math.DegToRad((i + 1) * 52 + Phaser.Math.Between(-10, 10));
+                const nr = radius * (0.8 + Phaser.Math.FloatBetween(0, 0.4));
+                g.lineTo(Math.cos(nextAngle) * nr, Math.sin(nextAngle) * nr);
+            }
+        }
+        g.closePath();
+        g.fillPath();
+
+        this.add(g);
+    }
+
+    update() {
+        if (!this.alive) return;
+        // Wrap around edges
+        const x = this.x % CONFIG.width;
+        const y = this.y % CONFIG.height;
+        this.setPosition(x, y);
+    }
+
+    hit(scene) {
+        this.hp--;
+        if (this.hp <= 0) {
+            this.alive = false;
+            scene.sound?.explosion();
+            // Particles
+            const p = scene.add.particles('particles');
+            for (let i = 0; i < 15; i++) {
+                p.create(this.x + Phaser.Math.Between(-20, 20), this.y + Phaser.Math.Between(-20, 20), {
+                    speed: Phaser.Math.Between(30, 150), life: CONFIG.particleLife
+                });
+            }
+        } else if (this.hp === 1) {
+            // Split into smaller pieces
+            const newAsteroid = new Asteroid(this.scene, this.x + Phaser.Math.Between(-40, 40), this.y + Phaser.Math.Between(-40, 40), 1);
+            this.scene.add.existing(newAsteroid);
+        }
+    }
+
+    destroy() {
+        this.alive = false;
+    }
+}
+
+// ============================================================
+// Saucer Enemy Class
+// ============================================================
+class Saucer extends Phaser.GameObjects.Container {
+    constructor(scene, x, y) {
+        super(scene, x || CONFIG.width / 2 + Phaser.Math.Between(-100, 100),
+            y || CONFIG.height / 2 + Phaser.Math.Between(-100, 100));
+
+        this.scene = scene;
+        this.hp = CONFIG.saucerHealth;
+        this.alive = true;
+        this.speed = CONFIG.saucerSpeed;
+        this.angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+
+        // Saucer body (oval)
+        const g = scene.add.graphics();
+        g.lineStyle(2, 0xff4444, 1);
+        g.fillStyle(0xcc3333, 0.8);
+        g.beginPath();
+        g.ellipse(0, 0, 25, 15, 0, 0, Math.PI * 2);
+        g.closePath();
+        g.fillPath();
+
+        // Cockpit circle
+        const cockpit = scene.add.circle(0, 0, 6, 0xff4444, 0.7);
+
+        this.add(g);
+        this.add(cockpit);
+    }
+
+    update() {
+        if (!this.alive) return;
+
+        // Move toward player
+        const dx = this.scene.player?.x - this.x || CONFIG.width / 2;
+        const dy = this.scene.player?.y - this.y || CONFIG.height / 2;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+            this.angle = Phaser.Math.Angle.Between(0, 0, dx, dy);
+            this.x += Math.cos(this.angle) * this.speed;
+            this.y += Math.sin(this.angle) * this.speed;
+        }
+
+        // Wrap around
+        const x = this.x % CONFIG.width;
+        const y = this.y % CONFIG.height;
+        this.setPosition(x, y);
+    }
+
+    hit(scene) {
+        this.hp--;
+        if (this.hp <= 0) {
+            this.alive = false;
+            scene.sound?.explosion();
+            const p = scene.add.particles('particles');
+            for (let i = 0; i < 15; i++) {
+                p.create(this.x + Phaser.Math.Between(-20, 20), this.y + Phaser.Math.Between(-20, 20), {
+                    speed: Phaser.Math.Between(30, 150), life: CONFIG.particleLife
+                });
+            }
+        }
+    }
+
+    destroy() {
+        this.alive = false;
+    }
+}
+
+// ============================================================
+// Main Game Scene
+// ============================================================
+class GameScene extends Phaser.Scene {
+    constructor(scene) { super('Game'); }
+
+    create() {
+        // Background stars
+        const stars = this.add.graphics();
+        for (let i = 0; i < 100; i++) {
+            const x = Phaser.Math.Between(0, CONFIG.width);
+            const y = Phaser.Math.Between(0, CONFIG.height);
+            const alpha = Phaser.Math.FloatBetween(0.3, 1);
+            stars.fillStyle(0xffffff, alpha);
+            stars.fillCircle(x, y, 1);
+        }
+
+        // Player ship
+        this.player = new Ship(this, CONFIG.width / 2, CONFIG.height / 2);
+        this.add.existing(this.player);
+
+        // Sound engine
+        this.sound = new SoundEngine(this);
+
+        // Particles
+        const particles = this.createParticles();
+        this.particles = particles;
+
+        // Asteroids
+        this.asteroids = [];
+        for (let i = 0; i < CONFIG.asteroidCount; i++) {
+            const size = Phaser.Math.Between(1, 3);
+            const a = new Asteroid(this, Phaser.Math.Between(0, CONFIG.width), Phaser.Math.Between(0, CONFIG.height), size);
+            this.add.existing(a);
+            this.asteroids.push(a);
+        }
+
+        // Saucer enemies
+        this.saucers = [];
+        for (let i = 0; i < 2; i++) {
+            const s = new Saucer(this, Phaser.Math.Between(100, CONFIG.width - 100), Phaser.Math.Between(100, CONFIG.height - 100));
+            this.add.existing(s);
+            this.saucers.push(s);
+        }
+
+        // HUD
+        this.scoreText = this.add.text(CONFIG.width / 2, 30, 'SCORE: 0', { fontSize: '24px', color: '#00ffcc' });
+        this.levelText = this.add.text(CONFIG.width / 2, 65, 'LEVEL: 1', { fontSize: '18px', color: '#ffff00' });
+
+        // Game state
+        this.gameOver = false;
+    }
+
+    update(time, delta) {
+        if (this.gameOver) return;
+
+        // Update player
+        this.player.update(time, delta);
+
+        // Shoot on spacebar or right half touch
+        const shootKey = this.input.keyboard.activeKey?. Phaser.Keyboard.SPACEBAR !== null && this.input.keyboard.isDown('SPACE');
+        if (!shootKey && this.input.touch.left.active) {
+            this.player.shoot(this);
+        } else if (this.input.touch.right.active) {
+            this.player.shoot(this);
+        }
+
+        // Update asteroids
+        for (const a of this.asteroids) {
+            a.update();
+        }
+
+        // Update saucers
+        for (const s of this.saucers) {
+            s.update();
+        }
+
+        // Collision: bullets vs asteroids/saucers
+        const bullets = [];
+        if (this.player.bullets > 0) {
+            const bx = this.player.x + Math.cos(this.player.angle) * 15;
+            const by = this.player.y + Math.sin(this.player.angle) * 15;
+            bullets.push({ x: bx, y: by, angle: this.player.angle });
+        }
+
+        for (const b of bullets) {
+            // Check asteroid collisions
+            for (const a of this.asteroids) {
+                if (!a.alive) continue;
+                const dx = a.x - b.x;
+                const dy = a.y - b.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 30) {
+                    a.hit(this);
+                    this.player.bullets--;
+                    break;
+                }
+            }
+
+            // Check saucer collisions
+            for (const s of this.saucers) {
+                if (!s.alive) continue;
+                const dx = s.x - b.x;
+                const dy = s.y - b.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 25) {
+                    s.hit(this);
+                    this.player.bullets--;
+                    break;
+                }
+            }
+
+            // Check player collision with asteroids/saucers
+            for (const a of this.asteroids) {
+                if (!a.alive) continue;
+                const dx = this.player.x - a.x;
+                const dy = this.player.y - a.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 30) {
+                    this.gameOver();
+                    return;
+                }
+            }
+
+            for (const s of this.saucers) {
+                if (!s.alive) continue;
+                const dx = this.player.x - s.x;
+                const dy = this.player.y - s.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 30) {
+                    this.gameOver();
+                    return;
+                }
+            }
+        }
+
+        // Level progression: every 1000 points, increase difficulty
+        const totalScore = this.player.score;
+        const level = Math.floor(totalScore / 500) + 1;
+        if (level > this.player.level) {
+            this.player.level = level;
+            this.sound?.levelUp();
+            // Spawn bonus asteroid
+            const size = Phaser.Math.Between(2, 3);
+            const a = new Asteroid(this, Phaser.Math.Between(0, CONFIG.width), Phaser.Math.Between(0, CONFIG.height), size);
+            this.add.existing(a);
+            this.asteroids.push(a);
+        }
+
+        // Update HUD
+        this.scoreText.setText(`SCORE: ${this.player.score}`);
+        this.levelText.setText(`LEVEL: ${this.player.level}`);
+
+        // Regenerate shields
+        if (time % 100 < 5) {
+            for (const slot of this.player.shields) {
+                if (!slot.exists()) continue;
+                const alpha = slot.alpha + 0.02;
+                if (alpha > 0.4) slot.setAlpha(0.4);
+            }
+        }
+
+        // Update particles
+        if (this.particles) this.particles.update(time, delta);
+    }
+
+    gameOver() {
+        this.gameOver = true;
+        this.player.destroy();
+        for (const a of this.asteroids) a.destroy();
+        for (const s of this.saucers) s.destroy();
+
+        // Game over text
+        const goText = this.add.text(CONFIG.width / 2, CONFIG.height / 2 - 50, 'GAME OVER', { fontSize: '48px', color: '#ff0000' });
+        const restartBtn = this.add.text(CONFIG.width / 2, CONFIG.height / 2 + 30, 'Press R to Restart', { fontSize: '24px', color: '#ffff00' });
+
+        // Restart on key press
+        this.input.keyboard.on('keydown-R', () => {
+            this.scene.restart();
+        }, this);
+    }
+
+    createParticles() {
+        return this.add.particles('particles');
+    }
+}
+
+// ============================================================
+// Boot Scene - Initialize Audio Context
+// ============================================================
+class BootScene extends Phaser.Scene {
+    constructor(scene) { super('Boot'); }
+    preload() {}
+    create() {
+        // Resume audio context on first interaction
+        this.sound = new SoundEngine(this);
+        if (this.sound.ctx.state === 'suspended') {
+            this.sound.ctx.resume();
+        }
+    }
+}
+
+// ============================================================
+// Game Setup
+// ============================================================
+const config = {
+    type: Phaser.AUTO,
+    width: CONFIG.width,
+    height: CONFIG.height,
+    parent: 'game',
+    backgroundColor: '#000011',
+    physics: { default: 'arcade' },
+    scene: [BootScene, GameScene],
+};
+
+const game = new Phaser.Game(config);
 </script>
 </body>
 </html>
