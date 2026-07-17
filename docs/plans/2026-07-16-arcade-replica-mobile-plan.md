@@ -89,7 +89,7 @@
 
 Each pass is independently shippable and re-playable on mobile.
 
-### Pass 0 — Baseline freeze & measurement `[ ]`
+### Pass 0 — Baseline freeze & measurement `[x]`
 **Objective:** Snapshot behavior and add a tiny debug/metrics hook for later A/B feel checks.  
 **Files:** `index.html`; optional `docs/plans/pass-log.md`  
 **Work:**
@@ -98,7 +98,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Game still loads on Pages; debug only with query flag.  
 **Owner:** Ornith (tiny edit) → Grok verify.
 
-### Pass 1 — Vector presentation (look) `[ ]`
+### Pass 1 — Vector presentation (look) `[x]`
 **Objective:** Replace filled/glow “neon arcade” with cabinet vector look.  
 **Work:**
 - Background pure black (optional very faint phosphor vignette only).
