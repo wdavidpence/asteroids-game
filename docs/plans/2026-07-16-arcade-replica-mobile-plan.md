@@ -108,7 +108,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Still playable; screenshot/compare checklist: black + white lines.  
 **Owner:** Ornith → Grok visual review.
 
-### Pass 2 — Authentic ship physics & controls `[ ]`
+### Pass 2 — Authentic ship physics & controls `[x]`
 **Objective:** Match standup control feel.  
 **Work:**
 - Friction ≈ 1.0 (or 0.999+ only for numerical safety); no soft “ice with brakes.”
@@ -119,7 +119,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Ship coasts forever after thrust; stopping requires reverse thrust feel.  
 **Owner:** Ornith.
 
-### Pass 3 — Lives, death, respawn (remove shields) `[ ]`
+### Pass 3 — Lives, death, respawn (remove shields) `[x]`
 **Objective:** Original life model.  
 **Work:**
 - Replace `shields:8` with `lives:3` (config 3–5).

@@ -61,3 +61,23 @@ maxBullets: 8
 
 ### Next
 - Pass 2 physics + Pass 3 lives
+
+## Pass 2+3 complete — 2026-07-17 02:33 UTC
+
+**Ornith:** skipped/rescue — model returns empty `content` (only `reasoning_content`); Aider whole-edit cannot finish.
+
+### Pass 2 — physics / shots
+- `friction: 1.0` (no drag)
+- `thrust: 280`, soft `maxSpeed: 520`
+- Bullets: fixed muzzle velocity (no ship-velocity inherit), `maxBullets:4`, life 1.05, cd 0.18
+
+### Pass 3 — lives
+- `startLives:3`, remove shields
+- Hit → explode debris → lose life → `respawnDelay:2.0` center + invuln
+- Extra life every 10_000 via `addScore`
+- HUD mini-ship icons for remaining lives
+- Game over on last life lost
+
+### Verify
+- node --check OK
+- rAF smoke frames=70 OK
