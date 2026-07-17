@@ -172,7 +172,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Mute-able via optional `M` key later; no audio exceptions crash game.  
 **Owner:** Ornith.
 
-### Pass 8 — Wave / difficulty pacing `[ ]`
+### Pass 8 — Wave / difficulty pacing `[x]`
 **Objective:** Original pressure curve.  
 **Work:**
 - Next wave only when all rocks **and** saucers cleared (or match original: rocks clear, saucer rules separate — document chosen rule in pass-log).
@@ -181,7 +181,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Early waves teach; late waves stressful but fair.  
 **Owner:** Ornith.
 
-### Pass 9 — Mobile control redesign (cabinet-on-glass) `[ ]`
+### Pass 9 — Mobile control redesign (cabinet-on-glass) `[x]`
 **Objective:** Phone play without losing 5-button mapping.  
 **Layout proposal:**
 ```

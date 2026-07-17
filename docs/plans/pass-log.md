@@ -119,3 +119,21 @@ Grok surgical implementation (Ornith skipped for multi-system pass).
 
 ### Verify
 - node --check + rAF smoke OK
+
+## Pass 8+9 complete — 2026-07-17 02:49 UTC
+
+### Pass 8 pacing
+- Wave rock count 4→11 via waveRockCount()
+- rockSpeedMult soft-caps at 1.55
+- WAVE CLEAR delay 0.85s before next level
+- Saucer interval shortens with score/level, floor 5.5s
+- Mobile: slower rocks (0.9×) + lower max ship speed (460)
+
+### Pass 9 mobile
+- L/R left cluster; thrust/fire right; HS above fire
+- safe-area insets; landscape smaller corner layout
+- Coarse: zone-tap disabled (buttons only)
+- Active button feedback; no context menu on buttons
+
+### Verify
+- syntax + rAF smoke OK

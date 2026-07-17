@@ -7,21 +7,53 @@
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#fff;font-family:"Courier New",Courier,monospace;touch-action:none;user-select:none;-webkit-user-select:none}
 canvas{display:block;width:100vw;height:100vh;background:#000}
-.hint{position:fixed;left:12px;bottom:10px;color:#9aa;font-size:12px;opacity:.75;pointer-events:none}
-.btn{position:fixed;bottom:22px;width:76px;height:76px;border:1px solid #8af;border-radius:50%;background:#0a1a3a55;color:#cfe;font-weight:700;font-size:22px;display:none;align-items:center;justify-content:center;touch-action:none}
-.left{left:18px}.right{left:108px}.thrust{right:108px}.fire{right:18px}
-.hyper{right:18px;bottom:112px;width:64px;height:64px;font-size:14px;letter-spacing:1px}
-@media(pointer:coarse){.btn{display:flex}.hint{display:none}}
+.hint{position:fixed;left:12px;bottom:10px;color:#9aa;font-size:12px;opacity:.75;pointer-events:none;z-index:2}
+/* Pass 9 — cabinet-on-glass mobile controls */
+.btn{
+  position:fixed;z-index:5;box-sizing:border-box;
+  width:72px;height:72px;border:1px solid rgba(160,200,255,.55);border-radius:50%;
+  background:rgba(20,40,80,.32);color:#dfefff;font-weight:700;font-size:22px;
+  display:none;align-items:center;justify-content:center;touch-action:none;
+  -webkit-tap-highlight-color:transparent;user-select:none;
+  bottom:calc(18px + env(safe-area-inset-bottom,0px));
+}
+.btn:active{background:rgba(80,140,255,.38);border-color:#9cf}
+.left{left:calc(16px + env(safe-area-inset-left,0px))}
+.right{left:calc(100px + env(safe-area-inset-left,0px))}
+.fire{right:calc(16px + env(safe-area-inset-right,0px))}
+.thrust{right:calc(100px + env(safe-area-inset-right,0px))}
+.hyper{
+  right:calc(16px + env(safe-area-inset-right,0px));
+  bottom:calc(108px + env(safe-area-inset-bottom,0px));
+  width:58px;height:58px;font-size:13px;letter-spacing:1px;opacity:.92
+}
+@media(pointer:coarse){
+  .btn{display:flex}
+  .hint{display:none}
+  /* slightly larger targets on phones */
+  .btn{width:76px;height:76px}
+  .hyper{width:64px;height:64px}
+}
+/* landscape: keep controls in lower corners, HS above fire */
+@media(pointer:coarse) and (orientation:landscape){
+  .btn{width:64px;height:64px;bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  .hyper{width:54px;height:54px;bottom:calc(88px + env(safe-area-inset-bottom,0px))}
+  .left{left:calc(12px + env(safe-area-inset-left,0px))}
+  .right{left:calc(84px + env(safe-area-inset-left,0px))}
+  .fire{right:calc(12px + env(safe-area-inset-right,0px))}
+  .thrust{right:calc(84px + env(safe-area-inset-right,0px))}
+  .hyper{right:calc(12px + env(safe-area-inset-right,0px))}
+}
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div class="hint">←/→ rotate · ↑/W thrust · Space fire · H/Shift hyperspace · M mute · P pause · Enter restart · ?debug=1</div>
-<div class="btn left" data-key="left">⟲</div>
-<div class="btn right" data-key="right">⟳</div>
-<div class="btn thrust" data-key="thrust">▲</div>
-<div class="btn fire" data-key="fire">●</div>
-<div class="btn hyper" data-key="hyper">HS</div>
+<div class="btn left" data-key="left" aria-label="rotate left">⟲</div>
+<div class="btn right" data-key="right" aria-label="rotate right">⟳</div>
+<div class="btn thrust" data-key="thrust" aria-label="thrust">▲</div>
+<div class="btn fire" data-key="fire" aria-label="fire">●</div>
+<div class="btn hyper" data-key="hyper" aria-label="hyperspace">HS</div>
 <script>
 (()=>{
 'use strict';
@@ -59,16 +91,40 @@ const CFG={
   // Pass 7 — audio pacing
   beatMinInterval:0.85,
   beatMaxInterval:0.28,
+  // Pass 8 — difficulty curve
+  waveBaseRocks:4,
+  waveRockCap:11,
+  waveClearDelay:0.85,     // brief calm between waves
+  rockSpeedScaleCap:1.55,  // speed multiplier plateaus
+  saucerSpawnFloor:5.5,    // min spawn interval late game
+  mobileMaxSpeed:460,      // softer speed cap on coarse pointers
   fxStars:false,
   vectorGlow:2
 };
 const DEBUG=new URLSearchParams(location.search).get('debug')==='1';
+const COARSE=typeof matchMedia==='function'&&matchMedia('(pointer:coarse)').matches;
 let W=0,H=0,DPR=1,last=0,paused=false,gameOver=false,level=1,score=0,high=+localStorage.asteroidsHighScore||0;
 let lives=CFG.startLives,nextExtraAt=CFG.extraLifeEvery,respawnT=0;
 let keys={left:false,right:false,thrust:false,fire:false},stars=[],ship,bullets=[],asteroids=[],particles=[],saucers=[],debris=[],lastShot=0,message='';
-let lastHyper=0,saucerTimer=12;
+let lastHyper=0,saucerTimer=12,wavePause=0;
 let audio,thrustNodes=null,saucerNodes=null,beatT=0,beatHi=false,muted=false;
 let fps=0,fpsFrames=0,fpsLast=performance.now();
+
+function effectiveMaxSpeed(){
+  return COARSE?CFG.mobileMaxSpeed:CFG.maxSpeed;
+}
+function rockSpeedMult(){
+  // rises with level then soft-caps (original-ish plateau feel)
+  return Math.min(CFG.rockSpeedScaleCap,1+(level-1)*0.06);
+}
+function waveRockCount(){
+  return Math.min(CFG.waveBaseRocks+level-1,CFG.waveRockCap);
+}
+function saucerInterval(){
+  // shorter waits as score/level rise, floor for fairness
+  const t=CFG.saucerSpawnMax-Math.min(7,level*0.35+score/25000);
+  return Math.max(CFG.saucerSpawnFloor,t)+(RAND()*(CFG.saucerSpawnMax-CFG.saucerSpawnMin)*0.35);
+}
 
 function resize(){
   DPR=Math.min(devicePixelRatio||1,2);
@@ -240,27 +296,30 @@ function reset(){
 
 function spawnLevel(){
   asteroids=[];
-  // Pass 4: only LARGE rocks; count scales then soft-caps
-  const n=Math.min(4+level,11);
+  // Pass 8: classic ramp 4→cap, only LARGE rocks
+  const n=waveRockCount();
   for(let i=0;i<n;i++){
     const edge=Math.floor(RAND()*4);
     let x=edge===0?0:edge===1?W:RAND()*W,y=edge===2?0:edge===3?H:RAND()*H;
-    if(Math.hypot(x-W/2,y-H/2)<170){x=(x+260)%W;y=(y+190)%H;}
+    if(Math.hypot(x-W/2,y-H/2)<Math.min(200,Math.min(W,H)*0.28)){x=(x+260)%W;y=(y+190)%H;}
     addAsteroid(x,y,'L');
   }
-  // don't auto-spawn saucer on every even level — Pass 6 uses timer
-  saucerTimer=Math.min(saucerTimer,4+RAND()*4);
+  saucerTimer=Math.min(saucerTimer,saucerInterval()*0.55);
+  wavePause=0;
   message='LEVEL '+level;setTimeout(()=>{if(!gameOver&&message==='LEVEL '+level)message='';},1200);beep('level');
 }
 function addAsteroid(x,y,size,vx,vy){
-  const r=CFG.rockR[size],base=CFG.rockSpeed[size]*(0.85+RAND()*0.35);
+  const r=CFG.rockR[size],mult=rockSpeedMult();
+  // mobile: slightly slower rocks for readability
+  const mobileMul=COARSE?0.9:1;
+  const base=CFG.rockSpeed[size]*(0.85+RAND()*0.35)*mult*mobileMul;
   const a=RAND()*TAU,n=9+Math.floor(RAND()*5);
   const verts=Array.from({length:n},(_,i)=>({ang:i*TAU/n+(RAND()-.5)*0.12,rad:r*(.72+RAND()*.42)}));
-  const spd=base+(size==='L'?level*2:size==='M'?level*3:level*4);
+  const spd=base+(size==='L'?level*1.5:size==='M'?level*2:level*2.5);
   asteroids.push({
     x,y,r,size,
-    vx:vx!=null?vx:Math.cos(a)*spd,
-    vy:vy!=null?vy:Math.sin(a)*spd,
+    vx:vx!=null?vx*mobileMul:Math.cos(a)*spd,
+    vy:vy!=null?vy*mobileMul:Math.sin(a)*spd,
     spin:(RAND()-.5)*1.8,a:RAND()*TAU,verts
   });
 }
@@ -400,9 +459,9 @@ function split(a){
 }
 
 function clampShipSpeed(){
-  const sp=Math.hypot(ship.vx,ship.vy);
-  if(sp>CFG.maxSpeed){
-    const k=CFG.maxSpeed/sp;
+  const sp=Math.hypot(ship.vx,ship.vy),cap=effectiveMaxSpeed();
+  if(sp>cap){
+    const k=cap/sp;
     ship.vx*=k;ship.vy*=k;
   }
 }
@@ -483,12 +542,22 @@ function update(dt){
 
   updateFX(dt);
   if(!ship.dead&&ship.hyper<=0)collide();
-  if(asteroids.length===0&&!saucers.length){level++;spawnLevel();}
-  // Pass 6 spawn timer (allows lurking meta if one rock left)
+
+  // Pass 8: wave clear gate + short inter-wave calm
+  if(wavePause>0){
+    wavePause-=dt;
+    if(wavePause<=0){level++;spawnLevel();}
+  }else if(asteroids.length===0&&!saucers.length){
+    wavePause=CFG.waveClearDelay;
+    message='WAVE CLEAR';
+    setTimeout(()=>{if(message==='WAVE CLEAR')message='';},700);
+  }
+
+  // Pass 6/8 spawn timer (allows lurking meta if one rock left)
   saucerTimer-=dt;
-  if(saucerTimer<=0&&!saucers.length&&asteroids.length>0){
+  if(saucerTimer<=0&&!saucers.length&&asteroids.length>0&&wavePause<=0){
     spawnSaucer();
-    saucerTimer=CFG.saucerSpawnMin+RAND()*(CFG.saucerSpawnMax-CFG.saucerSpawnMin);
+    saucerTimer=saucerInterval();
   }
 }
 
@@ -714,9 +783,13 @@ document.querySelectorAll('.btn').forEach(el=>{
 });
 canvas.addEventListener('pointerdown',e=>{
   initAudio();if(gameOver){reset();return;}if(e.pointerType==='mouse')return;
+  // Pass 9: on coarse pointers, dedicated buttons handle input — skip zone-tap to avoid mis-rotate
+  if(COARSE)return;
   const x=e.clientX;if(x<W*.33)keys.left=true;else if(x>W*.66)keys.right=true;else{keys.thrust=true;shoot();}
 });
-canvas.addEventListener('pointerup',()=>{keys.left=keys.right=keys.thrust=false;});
+canvas.addEventListener('pointerup',()=>{if(!COARSE){keys.left=keys.right=keys.thrust=false;}});
+// prevent browser gestures stealing controls
+document.querySelectorAll('.btn').forEach(el=>{el.addEventListener('contextmenu',e=>e.preventDefault());});
 reset();
 })();
 </script>
