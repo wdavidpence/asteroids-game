@@ -1,0 +1,15 @@
+{
+  "name": "asteroids-game",
+  "version": "1.1.0",
+  "description": "1979 Asteroids-style single-file Canvas 2D arcade clone — vector look, mobile touch, GitHub Pages",
+  "main": "index.html",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "check": "node --check <(python3 -c \"import re,pathlib;print(re.search(r'<script>([\\\\s\\\\S]*?)</script>', pathlib.Path('index.html').read_text()).group(1))\")",
+    "build": "echo 'Single-file HTML5 game, no build step needed'"
+  },
+  "keywords": ["asteroids", "arcade", "canvas", "html5", "mobile"],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -196,7 +196,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Full clear of wave 1–2 on phone using only touch.  
 **Owner:** Ornith → Grok device-check if available.
 
-### Pass 10 — Cabinet presentation polish `[ ]`
+### Pass 10 — Cabinet presentation polish `[x]`
 **Objective:** Standup “feel” without breaking mobile.  
 **Work:**
 - Optional letterboxed playfield with max aspect (simulate monitor) on desktop wide screens.
@@ -206,7 +206,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Title → play → game over → restart loop feels arcade.  
 **Owner:** Ornith.
 
-### Pass 11 — Hardening, a11y, perf, docs `[ ]`
+### Pass 11 — Hardening, a11y, perf, docs `[x]`
 **Objective:** Ship quality.  
 **Work:**
 - Cap particles; pool bullets/rocks if needed.
@@ -218,7 +218,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** 10-minute soak without leak/crash; Pages 200 + smoke.  
 **Owner:** Ornith + Grok publish judgment.
 
-### Pass 12 — Publish & verification gate `[ ]`
+### Pass 12 — Publish & verification gate `[x]`
 **Objective:** Ship to `wdavidpence.github.io/asteroids-game/`.  
 **Work:**
 - Commit per logical pass groups (not one mega-commit if avoidable).

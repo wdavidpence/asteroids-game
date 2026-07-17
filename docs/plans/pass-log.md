@@ -137,3 +137,20 @@ Grok surgical implementation (Ornith skipped for multi-system pass).
 
 ### Verify
 - syntax + rAF smoke OK
+
+## Pass 10+11 complete — 2026-07-17 02:52 UTC
+
+### Pass 10 attract/title
+- mode title|play|over state machine
+- Title: ASTEROIDS, HIGH score, blinking PRESS FIRE / TAP FIRE
+- Attract: invulnerable demo ship autopilot + slow rocks
+- Phosphor vignette; 1 COIN 1 PLAY
+- Fire/Enter/tap starts game; game over → replay same way
+
+### Pass 11 hardening
+- maxParticles 220
+- visibilitychange pauses sim + stops loops
+- package.json updated (Canvas 2D, not Phaser)
+
+### Verify
+- node --check + rAF smoke OK

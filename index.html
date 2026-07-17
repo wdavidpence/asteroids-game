@@ -98,6 +98,8 @@ const CFG={
   rockSpeedScaleCap:1.55,  // speed multiplier plateaus
   saucerSpawnFloor:5.5,    // min spawn interval late game
   mobileMaxSpeed:460,      // softer speed cap on coarse pointers
+  maxParticles:220,         // Pass 11 hardening
+  attractRocks:5,
   fxStars:false,
   vectorGlow:2
 };
@@ -105,10 +107,12 @@ const DEBUG=new URLSearchParams(location.search).get('debug')==='1';
 const COARSE=typeof matchMedia==='function'&&matchMedia('(pointer:coarse)').matches;
 let W=0,H=0,DPR=1,last=0,paused=false,gameOver=false,level=1,score=0,high=+localStorage.asteroidsHighScore||0;
 let lives=CFG.startLives,nextExtraAt=CFG.extraLifeEvery,respawnT=0;
+// Pass 10: title/attract | play | over
+let mode='title',blinkT=0,attractAI=0;
 let keys={left:false,right:false,thrust:false,fire:false},stars=[],ship,bullets=[],asteroids=[],particles=[],saucers=[],debris=[],lastShot=0,message='';
 let lastHyper=0,saucerTimer=12,wavePause=0;
 let audio,thrustNodes=null,saucerNodes=null,beatT=0,beatHi=false,muted=false;
-let fps=0,fpsFrames=0,fpsLast=performance.now();
+let fps=0,fpsFrames=0,fpsLast=performance.now(),pageHidden=false;
 
 function effectiveMaxSpeed(){
   return COARSE?CFG.mobileMaxSpeed:CFG.maxSpeed;
@@ -284,9 +288,36 @@ function makeShip(x,y,inv){
   return {x,y,vx:0,vy:0,a:-Math.PI/2,inv:inv||0,dead:false,hyper:0};
 }
 
+// Pass 10 — attract / title cabinet loop
+function startTitle(){
+  mode='title';gameOver=false;paused=false;score=0;level=1;lives=CFG.startLives;
+  message='';debris=[];bullets=[];saucers=[];particles=[];
+  stopSaucerSound();stopThrustSound();
+  ship=makeShip(W/2,H*0.58,0);
+  ship.inv=9999; // invulnerable demo ship
+  asteroids=[];
+  for(let i=0;i<CFG.attractRocks;i++){
+    addAsteroid(RAND()*W,RAND()*H,'L');
+  }
+  // slow demo rocks
+  for(const a of asteroids){a.vx*=0.45;a.vy*=0.45;}
+  attractAI=0;blinkT=0;keys.left=keys.right=keys.thrust=keys.fire=false;
+}
+function startGame(){
+  mode='play';
+  keys.left=keys.right=keys.thrust=keys.fire=false;
+  reset();
+}
+function goGameOver(){
+  mode='over';gameOver=true;message='GAME OVER';
+  stopThrustSound();stopSaucerSound();
+  if(score>high){high=score;localStorage.asteroidsHighScore=high;}
+}
+
 function reset(){
+  mode='play';
   gameOver=false;paused=false;level=1;score=0;message='';
-  lives=CFG.startLives;nextExtraAt=CFG.extraLifeEvery;respawnT=0;debris=[];
+  lives=CFG.startLives;nextExtraAt=CFG.extraLifeEvery;respawnT=0;debris=[];wavePause=0;
   saucerTimer=CFG.saucerSpawnMin+RAND()*(CFG.saucerSpawnMax-CFG.saucerSpawnMin);
   ship=makeShip(W/2,H/2,CFG.invuln);
   bullets=[];particles=[];saucers=[];
@@ -364,7 +395,7 @@ function saucerShoot(s){
 }
 
 function shoot(){
-  if(gameOver){reset();return;}
+  if(mode==='title'||mode==='over'||gameOver){startGame();return;}
   if(!ship||ship.dead||ship.hyper>0)return;
   const now=performance.now()/1000;
   if(now-lastShot<CFG.bulletCd||bullets.length>=CFG.maxBullets)return;
@@ -380,6 +411,9 @@ function shoot(){
   spark(nose.x,nose.y,3,'#fff',70);beep('shoot');
 }
 function spark(x,y,n,c='#fff',pow=160){
+  // Pass 11: hard cap particles
+  const room=Math.max(0,CFG.maxParticles-particles.length);
+  n=Math.min(n,room);
   for(let i=0;i<n;i++){
     const a=RAND()*TAU,sp=RAND()*pow;
     particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:.35+RAND()*.55,max:.9,c,r:1+RAND()*2.2});
@@ -409,8 +443,7 @@ function damage(force){
   stopThrustSound();
   lives--;
   if(lives<=0){
-    gameOver=true;message='GAME OVER';respawnT=0;
-    if(score>high){high=score;localStorage.asteroidsHighScore=high;}
+    goGameOver();respawnT=0;
   }else{
     respawnT=CFG.respawnDelay;
     message='';
@@ -466,7 +499,40 @@ function clampShipSpeed(){
   }
 }
 
+function updateAttract(dt){
+  blinkT+=dt;
+  // gentle auto-pilot demo ship
+  attractAI-=dt;
+  if(attractAI<=0){
+    attractAI=0.4+RAND()*1.2;
+    keys.left=RAND()<0.35;keys.right=!keys.left&&RAND()<0.35;
+    keys.thrust=RAND()<0.55;
+  }
+  if(keys.left)ship.a-=CFG.rot*0.55*dt;
+  if(keys.right)ship.a+=CFG.rot*0.55*dt;
+  if(keys.thrust){
+    ship.vx+=Math.cos(ship.a)*CFG.thrust*0.45*dt;
+    ship.vy+=Math.sin(ship.a)*CFG.thrust*0.45*dt;
+    clampShipSpeed();
+  }
+  ship.x+=ship.vx*dt;ship.y+=ship.vy*dt;
+  ship.vx*=0.995;ship.vy*=0.995; // soft attract drag so demo doesn't fly off forever
+  wrap(ship,22);
+  for(const a of asteroids){a.x+=a.vx*dt;a.y+=a.vy*dt;a.a+=a.spin*dt;wrap(a,a.r);}
+  updateFX(dt);
+  // no collide damage in attract
+}
+
 function update(dt){
+  if(pageHidden)return;
+  if(mode==='title'){updateAttract(dt);return;}
+  if(mode==='over'){
+    stopThrustSound();stopSaucerSound();
+    updateFX(dt);
+    // keep rocks drifting under GAME OVER
+    for(const a of asteroids){a.x+=a.vx*dt;a.y+=a.vy*dt;a.a+=a.spin*dt;wrap(a,a.r);}
+    return;
+  }
   if(paused||gameOver){
     stopThrustSound();
     if(gameOver)stopSaucerSound();
@@ -692,23 +758,44 @@ function drawDebug(){
 
 function drawHUD(){
   ctx.shadowBlur=0;
+  if(mode==='title'){
+    // Pass 10 cabinet title
+    ctx.textAlign='center';
+    ctx.fillStyle='#fff';
+    ctx.font='700 54px "Courier New",monospace';
+    ctx.fillText('ASTEROIDS',W/2,H*0.28);
+    ctx.font='16px "Courier New",monospace';
+    ctx.fillStyle='#ccc';
+    ctx.fillText('HIGH '+high,W/2,H*0.36);
+    // blink insert-coin style prompt
+    if(Math.floor(blinkT*2)%2===0){
+      ctx.fillStyle='#eee';
+      ctx.font='18px "Courier New",monospace';
+      ctx.fillText(COARSE?'TAP FIRE TO START':'PRESS FIRE / ENTER',W/2,H*0.78);
+    }
+    ctx.font='12px "Courier New",monospace';
+    ctx.fillStyle='#888';
+    ctx.fillText('1 COIN  1 PLAY',W/2,H*0.86);
+    drawDebug();
+    return;
+  }
   ctx.fillStyle='#eee';
   ctx.font='16px "Courier New",monospace';
   ctx.textAlign='left';
   ctx.fillText('SCORE '+score,16,28);
   ctx.fillText('HIGH '+high,16,50);
   // Pass 3: lives as mini ships (cabinet style)
-  for(let i=0;i<lives;i++)drawShipIcon(22+i*18,72,1);
+  if(mode==='play')for(let i=0;i<lives;i++)drawShipIcon(22+i*18,72,1);
   ctx.textAlign='right';
   ctx.fillText('LEVEL '+level,W-16,28);
-  if(paused||message||gameOver){
+  if(paused||message||mode==='over'){
     ctx.textAlign='center';
-    ctx.fillStyle=gameOver?'#f66':'#eee';
+    ctx.fillStyle=mode==='over'?'#f66':'#eee';
     ctx.font='28px "Courier New",monospace';
     ctx.fillText(paused?'PAUSED':message,W/2,H/2-16);
     ctx.font='14px "Courier New",monospace';
     ctx.fillStyle='#ccc';
-    if(gameOver)ctx.fillText('PRESS ENTER / TAP FIRE',W/2,H/2+18);
+    if(mode==='over')ctx.fillText(COARSE?'TAP FIRE — PLAY AGAIN':'PRESS FIRE / ENTER',W/2,H/2+18);
   }
   drawDebug();
 }
@@ -716,6 +803,12 @@ function drawHUD(){
 function draw(){
   ctx.fillStyle='#000';
   ctx.fillRect(0,0,W,H);
+  // subtle phosphor vignette (cabinet glass)
+  const g=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.2,W/2,H/2,Math.max(W,H)*0.72);
+  g.addColorStop(0,'rgba(0,0,0,0)');
+  g.addColorStop(1,'rgba(0,0,0,0.45)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+
   if(CFG.fxStars){
     for(const s of stars){
       s.x-=(ship&&ship.vx||0)*.006*s.z;s.y-=(ship&&ship.vy||0)*.006*s.z;wrap(s,2);
@@ -737,7 +830,7 @@ function draw(){
   }
   ctx.globalAlpha=1;
   drawDebris();
-  drawShip();
+  if(mode!=='over'||!ship.dead)drawShip();
   drawHUD();
 }
 
@@ -758,21 +851,28 @@ function setKey(k,v){
 }
 addEventListener('keydown',e=>{
   initAudio();
-  if(e.key==='p'||e.key==='P'){paused=!paused;if(paused)stopThrustSound();return;}
+  if(e.key==='p'||e.key==='P'){
+    if(mode==='play'){paused=!paused;if(paused)stopThrustSound();}
+    return;
+  }
   if(e.key==='m'||e.key==='M'){
     muted=!muted;
     if(muted){stopThrustSound();stopSaucerSound();}
     return;
   }
-  if(e.key==='Enter'&&gameOver){reset();return;}
+  if(e.key==='Enter'||e.key===' '){
+    if(mode==='title'||mode==='over'){startGame();e.preventDefault();return;}
+  }
+  if(mode!=='play')return;
   if(e.key==='h'||e.key==='H'||e.key==='Shift'){hyperspace();e.preventDefault();return;}
   setKey(e.key,true);if(e.key===' ')e.preventDefault();
 });
-addEventListener('keyup',e=>setKey(e.key,false));
+addEventListener('keyup',e=>{if(mode==='play')setKey(e.key,false);});
 document.querySelectorAll('.btn').forEach(el=>{
   const k=el.dataset.key;
   const on=e=>{
     e.preventDefault();initAudio();
+    if(mode==='title'||mode==='over'){if(k==='fire'||k==='thrust'||k==='hyper')startGame();return;}
     if(k==='fire'){keys.fire=true;shoot();}
     else if(k==='hyper'){hyperspace();}
     else keys[k]=true;
@@ -782,7 +882,9 @@ document.querySelectorAll('.btn').forEach(el=>{
   el.addEventListener('pointercancel',off);el.addEventListener('pointerleave',off);
 });
 canvas.addEventListener('pointerdown',e=>{
-  initAudio();if(gameOver){reset();return;}if(e.pointerType==='mouse')return;
+  initAudio();
+  if(mode==='title'||mode==='over'){startGame();return;}
+  if(e.pointerType==='mouse')return;
   // Pass 9: on coarse pointers, dedicated buttons handle input — skip zone-tap to avoid mis-rotate
   if(COARSE)return;
   const x=e.clientX;if(x<W*.33)keys.left=true;else if(x>W*.66)keys.right=true;else{keys.thrust=true;shoot();}
@@ -790,7 +892,15 @@ canvas.addEventListener('pointerdown',e=>{
 canvas.addEventListener('pointerup',()=>{if(!COARSE){keys.left=keys.right=keys.thrust=false;}});
 // prevent browser gestures stealing controls
 document.querySelectorAll('.btn').forEach(el=>{el.addEventListener('contextmenu',e=>e.preventDefault());});
-reset();
+
+// Pass 11: pause simulation when tab hidden
+document.addEventListener('visibilitychange',()=>{
+  pageHidden=document.hidden;
+  if(pageHidden){stopThrustSound();stopSaucerSound();}
+  else last=performance.now();
+});
+
+startTitle();
 })();
 </script>
 </body>
