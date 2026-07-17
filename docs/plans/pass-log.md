@@ -98,3 +98,24 @@ Ornith Aider: exited without edits (read-only answer). Grok surgical patches.
 
 ### Verify
 - node --check OK; rAF smoke OK
+
+## Pass 6+7 complete — 2026-07-17 02:43 UTC
+
+Grok surgical implementation (Ornith skipped for multi-system pass).
+
+### Pass 6 saucers
+- Large: slow, random fire, 200 pts, bigger silhouette
+- Small: faster, aims at ship (accuracy rises with score), 1000 pts
+- Only small after score ≥ 40_000
+- Timer spawn 8–16s while rocks remain (lurking allowed)
+- One-hit kill; wave clear waits for rocks AND saucers
+
+### Pass 7 audio
+- Thrust loop while thrusting
+- Size-based bangs (L/M/S/ship)
+- Saucer dual-tone warble L vs S
+- Heartbeat beat speeds with danger
+- M mute; hyperspace whoosh
+
+### Verify
+- node --check + rAF smoke OK

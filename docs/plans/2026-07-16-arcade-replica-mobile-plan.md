@@ -149,7 +149,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Usable under panic on phone; risk is real.  
 **Owner:** Ornith.
 
-### Pass 6 — Dual saucers + AI/scoring curve `[ ]`
+### Pass 6 — Dual saucers + AI/scoring curve `[x]`
 **Objective:** Authentic UFOs.  
 **Work:**
 - Large saucer: slower, dumb random shots, 200 pts.
@@ -160,7 +160,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Distinct threat profiles; correct points.  
 **Owner:** Ornith (logic-heavy — keep patch local).
 
-### Pass 7 — Authentic audio suite `[ ]`
+### Pass 7 — Authentic audio suite `[x]`
 **Objective:** Cabinet sound identity without ROM dumps.  
 **Work:**
 - Thrust: looping low saw/noise while thrust key down.
