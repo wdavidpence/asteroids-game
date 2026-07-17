@@ -2,11 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Asteroids</title>
 <style>
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#fff;font-family:"Courier New",Courier,monospace;touch-action:none;user-select:none;-webkit-user-select:none}
-canvas{display:block;width:100vw;height:100vh;background:#000}
+/* iOS Safari: avoid 100vw/100vh overflow (causes pan/zoom feel). Use fixed full-bleed. */
+html,body{
+  margin:0;padding:0;width:100%;height:100%;
+  overflow:hidden;overscroll-behavior:none;
+  background:#000;color:#fff;
+  font-family:"Courier New",Courier,monospace;
+  touch-action:none;user-select:none;-webkit-user-select:none;
+  position:fixed;inset:0;
+  -webkit-text-size-adjust:100%;text-size-adjust:100%;
+}
+canvas#game{
+  display:block;position:fixed;inset:0;
+  width:100%;height:100%;
+  background:#000;touch-action:none;
+  /* prevent iOS from treating canvas as zoomable image */
+  -webkit-touch-callout:none;
+}
 .hint{position:fixed;left:12px;bottom:10px;color:#9aa;font-size:12px;opacity:.75;pointer-events:none;z-index:2}
 /* Pass 9 — cabinet-on-glass mobile controls */
 .btn{
@@ -30,11 +48,9 @@ canvas{display:block;width:100vw;height:100vh;background:#000}
 @media(pointer:coarse){
   .btn{display:flex}
   .hint{display:none}
-  /* slightly larger targets on phones */
   .btn{width:76px;height:76px}
   .hyper{width:64px;height:64px}
 }
-/* landscape: keep controls in lower corners, HS above fire */
 @media(pointer:coarse) and (orientation:landscape){
   .btn{width:64px;height:64px;bottom:calc(12px + env(safe-area-inset-bottom,0px))}
   .hyper{width:54px;height:54px;bottom:calc(88px + env(safe-area-inset-bottom,0px))}
@@ -131,15 +147,43 @@ function saucerInterval(){
 }
 
 function resize(){
-  DPR=Math.min(devicePixelRatio||1,2);
-  W=innerWidth;H=innerHeight;
-  canvas.width=W*DPR;canvas.height=H*DPR;
+  // iOS Safari: visualViewport is the true visible area; 100vh/innerHeight can be wrong
+  // and overflow triggers the "zoomed / panning" feel.
+  const vv=window.visualViewport;
+  const cssW=Math.max(1,Math.floor((vv&&vv.width)||window.innerWidth||document.documentElement.clientWidth||320));
+  const cssH=Math.max(1,Math.floor((vv&&vv.height)||window.innerHeight||document.documentElement.clientHeight||480));
+  DPR=Math.min(window.devicePixelRatio||1,2);
+  W=cssW;H=cssH;
+  canvas.width=Math.floor(W*DPR);
+  canvas.height=Math.floor(H*DPR);
+  // CSS size must match CSS pixels exactly (not 100vw)
+  canvas.style.width=W+'px';
+  canvas.style.height=H+'px';
+  // If iOS URL bar shifts visualViewport offset, pin canvas to visible origin
+  if(vv){
+    canvas.style.left=Math.round(vv.offsetLeft)+'px';
+    canvas.style.top=Math.round(vv.offsetTop)+'px';
+  }else{
+    canvas.style.left='0';canvas.style.top='0';
+  }
   ctx.setTransform(DPR,0,0,DPR,0,0);
   if(CFG.fxStars){
     stars=Array.from({length:140},()=>({x:RAND()*W,y:RAND()*H,z:.25+RAND()*1.2,r:RAND()*1.7}));
   }else stars=[];
 }
-addEventListener('resize',resize,{passive:true});resize();
+addEventListener('resize',resize,{passive:true});
+addEventListener('orientationchange',()=>{setTimeout(resize,50);setTimeout(resize,250);},{passive:true});
+if(window.visualViewport){
+  visualViewport.addEventListener('resize',resize,{passive:true});
+  visualViewport.addEventListener('scroll',resize,{passive:true});
+}
+// Kill any residual document scroll / bounce that looks like zoom
+function killScroll(){if(window.scrollY||window.scrollX)window.scrollTo(0,0);}
+addEventListener('scroll',killScroll,{passive:true});
+// Block multi-touch pinch where possible
+addEventListener('gesturestart',e=>{e.preventDefault();},{passive:false});
+addEventListener('touchmove',e=>{if(e.touches&&e.touches.length>1)e.preventDefault();},{passive:false});
+resize();
 
 function initAudio(){try{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;audio=audio||new AC();if(audio.state==='suspended')audio.resume();}catch(e){}}
 
@@ -762,7 +806,7 @@ function drawHUD(){
     // Pass 10 cabinet title
     ctx.textAlign='center';
     ctx.fillStyle='#fff';
-    ctx.font='700 54px "Courier New",monospace';
+    ctx.font='700 42px "Courier New",monospace';
     ctx.fillText('ASTEROIDS',W/2,H*0.28);
     ctx.font='16px "Courier New",monospace';
     ctx.fillStyle='#ccc';
