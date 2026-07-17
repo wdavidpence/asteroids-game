@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=overlays-content">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -132,8 +132,8 @@ let keys={left:false,right:false,thrust:false,fire:false},stars=[],ship,bullets=
 let lastHyper=0,saucerTimer=12,wavePause=0;
 let audio,thrustNodes=null,saucerNodes=null,beatT=0,beatHi=false,muted=false;
 let fps=0,fpsFrames=0,fpsLast=performance.now(),pageHidden=false;
-// Stable layout lock — ignore Safari chrome show/hide height jiggle (looks like zoom on tap)
-let layoutW=0,layoutH=0,lastTouchEnd=0;
+// Stable layout lock — first touch freezes size so Safari chrome hide can't "zoom"
+let layoutW=0,layoutH=0,lastTouchEnd=0,layoutFrozen=false,ignoreViewportUntil=0;
 
 function effectiveMaxSpeed(){
   return COARSE?CFG.mobileMaxSpeed:CFG.maxSpeed;
@@ -153,37 +153,20 @@ function saucerInterval(){
 
 function readViewportSize(){
   const vv=window.visualViewport;
-  // Prefer layout viewport for height stability; visualViewport height jumps when URL bar toggles
+  // Use layout viewport (inner*) as primary — more stable than visualViewport on first tap
   const cssW=Math.max(1,Math.floor(window.innerWidth||document.documentElement.clientWidth||(vv&&vv.width)||320));
-  // Use the larger of visual vs layout height so first paint fills screen; lock later
   const hLayout=Math.floor(window.innerHeight||document.documentElement.clientHeight||480);
   const hVisual=Math.floor((vv&&vv.height)||hLayout);
+  // Prefer the larger height so we don't grow later when chrome hides (growth = shrink/zoom feel)
   const cssH=Math.max(1,Math.max(hLayout,hVisual));
   return {cssW,cssH};
 }
 
-function resize(force){
-  const {cssW,cssH}=readViewportSize();
-  const widthChanged=!layoutW||Math.abs(cssW-layoutW)>=2;
-  const heightChanged=!layoutH||Math.abs(cssH-layoutH)>=2;
-  // Orientation / first layout only — ignore small height-only chrome changes after lock
-  if(!force&&layoutW&&layoutH){
-    if(!widthChanged&&Math.abs(cssH-layoutH)<120){
-      // chrome toggle only — keep locked playfield so controls don't "zoom"
-      return;
-    }
-  }
-  // On width change (rotate), take new size; on big height change too
-  layoutW=cssW;
-  if(force||widthChanged||!layoutH||Math.abs(cssH-layoutH)>=120){
-    layoutH=cssH;
-  }
+function applyCanvasSize(){
   DPR=Math.min(window.devicePixelRatio||1,2);
   W=layoutW;H=layoutH;
   canvas.width=Math.floor(W*DPR);
   canvas.height=Math.floor(H*DPR);
-  // Always pin to top-left of layout viewport — NEVER follow visualViewport.offset*
-  // (offset jumps on tap and feels exactly like zoom-in on left control)
   canvas.style.left='0px';
   canvas.style.top='0px';
   canvas.style.width=W+'px';
@@ -194,39 +177,79 @@ function resize(force){
   }else stars=[];
   window.scrollTo(0,0);
 }
+
+function resize(force){
+  // After first user gesture, ignore chrome-driven viewport noise entirely
+  if(layoutFrozen&&!force){
+    if(performance.now()<ignoreViewportUntil)return;
+    const {cssW}=readViewportSize();
+    // Only unlock for real orientation/width change
+    if(Math.abs(cssW-layoutW)<8)return;
+  }
+  if(performance.now()<ignoreViewportUntil&&!force)return;
+
+  const {cssW,cssH}=readViewportSize();
+  const widthChanged=!layoutW||Math.abs(cssW-layoutW)>=2;
+
+  if(!force&&layoutW&&layoutH&&layoutFrozen){
+    // Frozen: only accept width (orientation) changes
+    if(!widthChanged)return;
+  }
+  if(!force&&layoutW&&layoutH&&!layoutFrozen){
+    // Pre-freeze: ignore small height-only chrome jiggle
+    if(!widthChanged&&Math.abs(cssH-layoutH)<120)return;
+  }
+
+  layoutW=cssW;
+  if(force||widthChanged||!layoutH||Math.abs(cssH-layoutH)>=120||!layoutFrozen){
+    // When freezing / first layout, take max height we've seen so chrome-hide doesn't grow later
+    layoutH=layoutH?Math.max(layoutH,cssH):cssH;
+    if(widthChanged)layoutH=cssH; // orientation: trust new height
+  }
+  applyCanvasSize();
+}
+
+/** Call once on first real finger down — locks the board so Safari chrome can't rescale. */
+function freezeLayoutFromFirstTouch(){
+  if(layoutFrozen)return;
+  const {cssW,cssH}=readViewportSize();
+  layoutW=cssW;
+  // Lock to the max height seen so bar-hide can't change scale
+  layoutH=Math.max(layoutH||0,cssH,Math.floor(window.innerHeight||cssH));
+  layoutFrozen=true;
+  ignoreViewportUntil=performance.now()+800; // ignore cascade of first-tap viewport events
+  applyCanvasSize();
+  window.scrollTo(0,0);
+}
+
 addEventListener('resize',()=>resize(false),{passive:true});
 addEventListener('orientationchange',()=>{
-  layoutW=0;layoutH=0; // force re-measure after rotate
+  layoutFrozen=false;layoutW=0;layoutH=0;
   setTimeout(()=>resize(true),50);
-  setTimeout(()=>resize(true),300);
+  setTimeout(()=>{resize(true);layoutFrozen=true;ignoreViewportUntil=performance.now()+500;},350);
 },{passive:true});
 if(window.visualViewport){
-  // Only react to genuine size changes; still gated inside resize()
   visualViewport.addEventListener('resize',()=>resize(false),{passive:true});
-  // Do NOT listen to visualViewport scroll — that repositions with offset and causes jump/zoom feel
 }
 function killScroll(){if(window.scrollY||window.scrollX)window.scrollTo(0,0);}
 addEventListener('scroll',killScroll,{passive:true});
-// Block pinch + double-tap zoom (iOS still double-tap zooms controls sometimes)
 addEventListener('gesturestart',e=>{e.preventDefault();},{passive:false});
 addEventListener('gesturechange',e=>{e.preventDefault();},{passive:false});
 addEventListener('touchmove',e=>{
-  // prevent page pan/zoom; allow single-finger game controls
   if(e.touches&&e.touches.length>1)e.preventDefault();
   else if(e.target===document.body||e.target===document.documentElement||e.target===canvas)e.preventDefault();
 },{passive:false});
-// Quash double-tap-to-zoom on rapid control taps (left rotate especially)
 addEventListener('touchend',e=>{
   const now=performance.now();
-  if(now-lastTouchEnd<=350){
-    e.preventDefault();
-  }
+  if(now-lastTouchEnd<=350)e.preventDefault();
   lastTouchEnd=now;
 },{passive:false});
+// Capture-phase first touch: freeze BEFORE control handlers run
 addEventListener('touchstart',e=>{
-  // Keep document from focusing/zooming; buttons call preventDefault too
+  freezeLayoutFromFirstTouch();
   if(e.touches&&e.touches.length>1)e.preventDefault();
-},{passive:false});
+},{passive:false,capture:true});
+addEventListener('pointerdown',()=>{freezeLayoutFromFirstTouch();},{capture:true,passive:true});
 resize(true);
 
 function initAudio(){try{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;audio=audio||new AC();if(audio.state==='suspended')audio.resume();}catch(e){}}
