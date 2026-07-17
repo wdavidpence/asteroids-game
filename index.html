@@ -10,16 +10,18 @@ canvas{display:block;width:100vw;height:100vh;background:#000}
 .hint{position:fixed;left:12px;bottom:10px;color:#9aa;font-size:12px;opacity:.75;pointer-events:none}
 .btn{position:fixed;bottom:22px;width:76px;height:76px;border:1px solid #8af;border-radius:50%;background:#0a1a3a55;color:#cfe;font-weight:700;font-size:22px;display:none;align-items:center;justify-content:center;touch-action:none}
 .left{left:18px}.right{left:108px}.thrust{right:108px}.fire{right:18px}
+.hyper{right:18px;bottom:112px;width:64px;height:64px;font-size:14px;letter-spacing:1px}
 @media(pointer:coarse){.btn{display:flex}.hint{display:none}}
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div class="hint">←/→ rotate · ↑/W thrust · Space fire · P pause · Enter restart · ?debug=1</div>
+<div class="hint">←/→ rotate · ↑/W thrust · Space fire · H/Shift hyperspace · P pause · Enter restart · ?debug=1</div>
 <div class="btn left" data-key="left">⟲</div>
 <div class="btn right" data-key="right">⟳</div>
 <div class="btn thrust" data-key="thrust">▲</div>
 <div class="btn fire" data-key="fire">●</div>
+<div class="btn hyper" data-key="hyper">HS</div>
 <script>
 (()=>{
 'use strict';
@@ -40,6 +42,15 @@ const CFG={
   startLives:3,
   extraLifeEvery:10000,
   respawnDelay:2.0,
+  // Pass 4 — classic rock economy
+  rockR:{L:42,M:22,S:11},
+  rockScore:{L:20,M:50,S:100},
+  rockSpeed:{L:45,M:85,S:130},
+  rockChildJitter:0.55,
+  // Pass 5 — hyperspace
+  hyperFailChance:1/6,
+  hyperDelay:0.35,
+  hyperCooldown:0.85,
   fxStars:false,
   vectorGlow:2
 };
@@ -47,6 +58,7 @@ const DEBUG=new URLSearchParams(location.search).get('debug')==='1';
 let W=0,H=0,DPR=1,last=0,paused=false,gameOver=false,level=1,score=0,high=+localStorage.asteroidsHighScore||0;
 let lives=CFG.startLives,nextExtraAt=CFG.extraLifeEvery,respawnT=0;
 let keys={left:false,right:false,thrust:false,fire:false},stars=[],ship,bullets=[],asteroids=[],particles=[],saucers=[],debris=[],lastShot=0,message='';
+let lastHyper=0;
 let audio;
 let fps=0,fpsFrames=0,fpsLast=performance.now();
 
@@ -114,7 +126,7 @@ function addScore(n){
 }
 
 function makeShip(x,y,inv){
-  return {x,y,vx:0,vy:0,a:-Math.PI/2,inv:inv||0,dead:false};
+  return {x,y,vx:0,vy:0,a:-Math.PI/2,inv:inv||0,dead:false,hyper:0};
 }
 
 function reset(){
@@ -125,20 +137,29 @@ function reset(){
 }
 
 function spawnLevel(){
-  asteroids=[];const n=4+level;
+  asteroids=[];
+  // Pass 4: only LARGE rocks; count scales then soft-caps
+  const n=Math.min(4+level,11);
   for(let i=0;i<n;i++){
     const edge=Math.floor(RAND()*4);
     let x=edge===0?0:edge===1?W:RAND()*W,y=edge===2?0:edge===3?H:RAND()*H;
     if(Math.hypot(x-W/2,y-H/2)<170){x=(x+260)%W;y=(y+190)%H;}
-    addAsteroid(x,y,46,35+level*7);
+    addAsteroid(x,y,'L');
   }
   if(level%2===0)spawnSaucer();
   message='LEVEL '+level;setTimeout(()=>{if(!gameOver&&message==='LEVEL '+level)message='';},1200);beep('level');
 }
-function addAsteroid(x,y,r,speed){
-  const a=RAND()*TAU,n=10+Math.floor(RAND()*4);
-  const verts=Array.from({length:n},(_,i)=>({ang:i*TAU/n,rad:r*(.72+RAND()*.42)}));
-  asteroids.push({x,y,r,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,spin:(RAND()-.5)*1.6,a:RAND()*TAU,verts});
+function addAsteroid(x,y,size,vx,vy){
+  const r=CFG.rockR[size],base=CFG.rockSpeed[size]*(0.85+RAND()*0.35);
+  const a=RAND()*TAU,n=9+Math.floor(RAND()*5);
+  const verts=Array.from({length:n},(_,i)=>({ang:i*TAU/n+(RAND()-.5)*0.12,rad:r*(.72+RAND()*.42)}));
+  const spd=base+(size==='L'?level*2:size==='M'?level*3:level*4);
+  asteroids.push({
+    x,y,r,size,
+    vx:vx!=null?vx:Math.cos(a)*spd,
+    vy:vy!=null?vy:Math.sin(a)*spd,
+    spin:(RAND()-.5)*1.8,a:RAND()*TAU,verts
+  });
 }
 function spawnSaucer(){
   const side=RAND()<.5?-30:W+30;
@@ -147,7 +168,7 @@ function spawnSaucer(){
 
 function shoot(){
   if(gameOver){reset();return;}
-  if(!ship||ship.dead)return;
+  if(!ship||ship.dead||ship.hyper>0)return;
   const now=performance.now()/1000;
   if(now-lastShot<CFG.bulletCd||bullets.length>=CFG.maxBullets)return;
   lastShot=now;
@@ -186,9 +207,10 @@ function spawnDebris(x,y,a){
 }
 
 // Pass 3: lethal hit → explode → lose life → respawn or game over
-function damage(){
-  if(!ship||ship.dead||ship.inv>0||gameOver)return;
-  ship.dead=true;
+function damage(force){
+  if(!ship||ship.dead||gameOver)return;
+  if(!force&&(ship.inv>0||ship.hyper>0))return;
+  ship.dead=true;ship.hyper=0;
   ship.vx=0;ship.vy=0;
   spawnDebris(ship.x,ship.y,ship.a);
   beep('boom');
@@ -202,6 +224,17 @@ function damage(){
   }
 }
 
+// Pass 5: hyperspace vanish → random reentry (1/6 self-destruct)
+function hyperspace(){
+  if(gameOver||paused||!ship||ship.dead||ship.hyper>0)return;
+  const now=performance.now()/1000;
+  if(now-lastHyper<CFG.hyperCooldown)return;
+  lastHyper=now;
+  ship.hyper=CFG.hyperDelay;
+  ship.vx=0;ship.vy=0;
+  beep('hit');
+}
+
 function respawnShip(){
   ship=makeShip(W/2,H/2,CFG.invuln);
   respawnT=0;
@@ -213,10 +246,21 @@ function respawnShip(){
 }
 
 function split(a){
-  addScore(a.r>32?30:a.r>20?50:100);
-  spark(a.x,a.y,20,'#fff',220);beep('boom');
-  if(a.r>22){
-    for(let i=0;i<2;i++)addAsteroid(a.x+(RAND()-.5)*12,a.y+(RAND()-.5)*12,a.r*.56,70+level*10+RAND()*35);
+  const size=a.size||(a.r>30?'L':a.r>16?'M':'S');
+  addScore(CFG.rockScore[size]||100);
+  spark(a.x,a.y,size==='L'?28:size==='M'?18:12,'#fff',size==='L'?260:180);beep('boom');
+  const child=size==='L'?'M':size==='M'?'S':null;
+  if(!child)return;
+  for(let i=0;i<2;i++){
+    const ang=RAND()*TAU,sp=CFG.rockSpeed[child]*(0.9+RAND()*0.4)+(level*2);
+    const j=CFG.rockChildJitter*a.r;
+    addAsteroid(
+      a.x+(RAND()-.5)*j*2,
+      a.y+(RAND()-.5)*j*2,
+      child,
+      Math.cos(ang)*sp,
+      Math.sin(ang)*sp
+    );
   }
 }
 
@@ -239,6 +283,21 @@ function update(dt){
   if(ship.dead){
     respawnT-=dt;
     if(respawnT<=0&&lives>0)respawnShip();
+  }else if(ship.hyper>0){
+    // Pass 5: in hyperspace — invisible, no control/collision
+    ship.hyper-=dt;
+    if(ship.hyper<=0){
+      ship.hyper=0;
+      if(RAND()<CFG.hyperFailChance){
+        // re-entry fail ≈ original 1/6
+        ship.x=40+RAND()*(W-80);ship.y=40+RAND()*(H-80);
+        damage(true);
+      }else{
+        ship.x=40+RAND()*(W-80);ship.y=40+RAND()*(H-80);
+        ship.vx=0;ship.vy=0;
+        ship.inv=Math.max(ship.inv,0.6);
+      }
+    }
   }else{
     if(keys.left)ship.a-=CFG.rot*dt;
     if(keys.right)ship.a+=CFG.rot*dt;
@@ -273,7 +332,7 @@ function update(dt){
     if(s.shoot<=0&&!ship.dead){s.shoot=1.2+RAND()*1.4;saucerShoot(s);}
   }
   updateFX(dt);
-  if(!ship.dead)collide();
+  if(!ship.dead&&ship.hyper<=0)collide();
   if(asteroids.length===0){level++;spawnLevel();}
   if(level%2===0&&saucers.length===0&&RAND()<dt*.05)spawnSaucer();
 }
@@ -308,9 +367,9 @@ function collide(){
           break;
         }
       }
-    }else if(!ship.dead&&dist2(b,ship)<(CFG.shipR+3)*(CFG.shipR+3)){bullets.splice(bi,1);damage();}
+    }else if(!ship.dead&&ship.hyper<=0&&dist2(b,ship)<(CFG.shipR+3)*(CFG.shipR+3)){bullets.splice(bi,1);damage();}
   }
-  if(ship.dead)return;
+  if(ship.dead||ship.hyper>0)return;
   for(let ai=asteroids.length-1;ai>=0;ai--){
     const a=asteroids[ai];
     if(dist2(ship,a)<(a.r+CFG.shipR*.72)*(a.r+CFG.shipR*.72)){asteroids.splice(ai,1);split(a);damage();}
@@ -345,7 +404,7 @@ function drawShipIcon(x,y,scale){
   ctx.restore();
 }
 function drawShip(){
-  if(!ship||ship.dead)return;
+  if(!ship||ship.dead||ship.hyper>0)return;
   ctx.save();ctx.translate(ship.x,ship.y);ctx.rotate(ship.a);
   if(ship.inv>0&&Math.floor(ship.inv*12)%2===0)ctx.globalAlpha=.35;
   ctx.strokeStyle='#fff';ctx.lineWidth=1.6;ctx.lineJoin='round';
@@ -383,7 +442,8 @@ function drawDebug(){
     'BUL '+bullets.length+' PAR '+particles.length,
     'SCR '+score+' LVL '+level+' LIVES '+lives,
     'VX '+(ship&&!ship.dead?ship.vx.toFixed(0):0)+' VY '+(ship&&!ship.dead?ship.vy.toFixed(0):0),
-    'DEAD '+(ship&&ship.dead?1:0)+' RT '+respawnT.toFixed(2)+' FR '+CFG.friction
+    'DEAD '+(ship&&ship.dead?1:0)+' HY '+(ship&&ship.hyper?ship.hyper.toFixed(2):0),
+    'ROCKS '+asteroids.map(a=>a.size||'?').join('')
   ];
   ctx.save();
   ctx.font='12px monospace';ctx.textAlign='left';ctx.fillStyle='rgba(0,0,0,.55)';
@@ -463,13 +523,19 @@ addEventListener('keydown',e=>{
   initAudio();
   if(e.key==='p'||e.key==='P'){paused=!paused;return;}
   if(e.key==='Enter'&&gameOver){reset();return;}
+  if(e.key==='h'||e.key==='H'||e.key==='Shift'){hyperspace();e.preventDefault();return;}
   setKey(e.key,true);if(e.key===' ')e.preventDefault();
 });
 addEventListener('keyup',e=>setKey(e.key,false));
 document.querySelectorAll('.btn').forEach(el=>{
   const k=el.dataset.key;
-  const on=e=>{e.preventDefault();initAudio();if(k==='fire'){keys.fire=true;shoot();}else keys[k]=true;};
-  const off=e=>{e.preventDefault();keys[k]=false;};
+  const on=e=>{
+    e.preventDefault();initAudio();
+    if(k==='fire'){keys.fire=true;shoot();}
+    else if(k==='hyper'){hyperspace();}
+    else keys[k]=true;
+  };
+  const off=e=>{e.preventDefault();if(k!=='hyper')keys[k]=false;};
   el.addEventListener('pointerdown',on);el.addEventListener('pointerup',off);
   el.addEventListener('pointercancel',off);el.addEventListener('pointerleave',off);
 });

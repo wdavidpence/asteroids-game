@@ -129,7 +129,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** No shield ring; three ships in HUD; death is lethal.  
 **Owner:** Ornith.
 
-### Pass 4 — Asteroid sizes, split rules, scoring `[ ]`
+### Pass 4 — Asteroid sizes, split rules, scoring `[x]`
 **Objective:** Classic rock economy.  
 **Work:**
 - Three radii (e.g. 40 / 20 / 10 scaled to canvas min-dimension).
@@ -140,7 +140,7 @@ Each pass is independently shippable and re-playable on mobile.
 **Acceptance:** Clearing a large yields correct cascade and points.  
 **Owner:** Ornith.
 
-### Pass 5 — Hyperspace `[ ]`
+### Pass 5 — Hyperspace `[x]`
 **Objective:** Fifth cabinet control.  
 **Work:**
 - Button + key; ship vanishes N ms, reappears random safe-ish position.

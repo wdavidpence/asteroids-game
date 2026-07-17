@@ -81,3 +81,20 @@ maxBullets: 8
 ### Verify
 - node --check OK
 - rAF smoke frames=70 OK
+
+## Pass 4+5 complete — 2026-07-17 02:40 UTC
+
+Ornith Aider: exited without edits (read-only answer). Grok surgical patches.
+
+### Pass 4
+- Discrete L/M/S: r 42/22/11, scores 20/50/100
+- Spawn only L; L→2M, M→2S; speed tiers
+- Wave count min(4+level,11)
+
+### Pass 5
+- Hyperspace: H/Shift + mobile HS button
+- Vanish 0.35s, reappear random; ~1/6 fail → life loss
+- Cooldown 0.85s; no collide/draw while hyper
+
+### Verify
+- node --check OK; rAF smoke OK
